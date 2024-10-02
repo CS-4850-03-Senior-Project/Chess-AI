@@ -119,3 +119,8 @@ dmypy.json
 
 #Pycharm IDE
 .idea
+
+# Development stuff
+MODELS/
+codepal_example.py
+gpu_testing.py

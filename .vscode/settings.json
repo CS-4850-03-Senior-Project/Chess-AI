@@ -1,10 +1,15 @@
 {
   "cSpell.words": [
     "bestmove",
+    "dtype",
     "isready",
+    "optim",
     "readyok",
+    "relu",
+    "softmax",
     "startpos",
     "ucinewgame",
-    "uciok"
+    "uciok",
+    "unsqueeze"
   ]
 }
