@@ -3,6 +3,8 @@
     "bestmove",
     "dtype",
     "isready",
+    "Meaders",
+    "Nhut",
     "optim",
     "readyok",
     "relu",

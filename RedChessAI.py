@@ -1,3 +1,33 @@
+# Title: Red Chess AI
+# Authors:  James-Calvin Meaders,
+#           Nhut Tran,  
+#           David Cardenas-Verdin,
+#           Joe Nguyen
+# Date: 2024 Fall Semester November 21
+# Description:  An AI agent for playing chess. The model is intended to be 
+#   available for play at https://lichess.org/@/RedChessAI
+# Things to add or learn about:
+#   - Temporal difference (TD) Learning
+#   - Saving optimizer state
+#   - Start training at endgame
+# Development History:
+#   - Started with an arbitrary model size and simple reward function
+#   - Added saving and load models
+#   - Model size increased via hidden layers `intermediate_layers`
+#   - Reward function modified to incentivize shorter games
+#   - Added reward for capturing pieces
+# References:
+#   - How to Create a Chess Engine with PyTorch
+#       - https://www.youtube.com/watch?v=-WDRaRUjRMg
+#   - How to Evaluate a Chess Position
+#       - https://thechessworld.com/articles/general-information/how-to-evaluate-a-chess-position/
+#   - How to Evaluate Chess Positions (Example)
+#       - https://www.chess.com/article/view/how-to-evaluate-a-position
+#   - Q-Learning
+#       - https://www.geeksforgeeks.org/q-learning-in-python/
+#   - Reinforcement Learning in Chess
+#       - https://medium.com/@samgill1256/reinforcement-learning-in-chess-73d97fad96b3
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -6,21 +36,43 @@ import chess
 import chess.pgn
 import os
 from datetime import datetime
+from EvaluationNetwork import EvaluationNetwork
 
 
 # Hyperparameters
 learning_rate = 0.0001
-num_episodes = 100
-initial_temperature = 0.3
+num_episodes = 1000
+initial_temperature = 1.0
 temperature_decay = 0.995
-min_temperature = 0.05
+min_temperature = 0.02
 
 # Reward Parameters
-reward_decay = 1.0
+reward_decay = 0.99
+win_turn_bonus_decay = 0.95
+target_turn_count = 100
+win_reward = 1 # reward for winning
+win_turn_bonus = 2 # bonus points for finishing the game within target turns
+capture_rewards = {
+    chess.PAWN: 0.01,
+    chess.KNIGHT: 0.025,
+    chess.BISHOP: 0.025,
+    chess.ROOK: 0.05,
+    chess.QUEEN: 0.10
+}
+stalemate_reward = 0
+stalemate_turn_bonus = 1
+stalemate_turn_decay = 0.9
+stalemate_target_turn = 40
 
-# Changing this hyperparameter changes the model (requires retraining)
-hidden_size = 128
-intermediate_layers = 2
+# Starting point of trainee model
+load_trainee = False
+trainee_name = "RedChessAI20241002111715"
+trainee_model_filename = trainee_name + ".pth" 
+trainee_optimizer_filename = trainee_name + "_optimizer.pth"
+
+# Model of the opponent (can be the same as trainee)
+load_opponent = True # If false, the opponent will play randomly
+opponent_model_load_file = "RedChessAI20241002120406.pth"
 
 # Endgame positions (We will focus training on endgame first)
 endgame_training = True
@@ -89,51 +141,23 @@ def board_to_tensor(board):
     # Convert the numpy array to a PyTorch tensor and add batch dimension
     return torch.from_numpy(board_tensor).unsqueeze(0).to(device)
 
-# Neural network model to predict the value of a board state
-class ValueNetwork(nn.Module):
-    def __init__(self):
-        super(ValueNetwork, self).__init__()
-        self.conv1 = nn.Conv2d(14, 32, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
-        self.fc1 = nn.Linear(64 * 8 * 8, hidden_size)
-        self.fci = nn.Linear(hidden_size, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, 1)
-        self.relu = nn.ReLU()
-        
-    def forward(self, x):
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = x.view(-1, 64 * 8 * 8)
-        x = self.relu(self.fc1(x))
-        for _ in range(intermediate_layers):
-            x = self.relu(self.fci(x))
-        x = self.fc2(x)
-        return x
-
 # Initialize the value network and optimizer
-trainee_model = ValueNetwork().to(device)
+trainee_model = EvaluationNetwork().to(device)
 optimizer = optim.Adam(trainee_model.parameters(), lr=learning_rate)
-opponent_model = ValueNetwork().to(device)
-
-# Starting point of trainee model
-load_trainee = True
-trainee_model_filename = "RedChessAI20241001194738.pth" 
-
-# Model of the opponent (can be the same as trainee)
-load_opponent = True # If false, the opponent will play randomly
-opponent_model_load_file = "RedChessAI20241001194738.pth" 
+opponent_model = EvaluationNetwork().to(device)
 
 # Load trainee
 if load_trainee:
   model_path = os.path.join(models_dir, trainee_model_filename)
-  trainee_model.load_state_dict(torch.load(model_path, weights_only=True))
+  trainee_model.load_state_dict(torch.load(model_path))
+  trainee_optimizer_path = os.path.join(models_dir, trainee_optimizer_filename)
 trainee_model.to(device)
 
 # Load opponent
 if load_opponent:
   opponent_model_path = os.path.join(models_dir, opponent_model_load_file)
   opponent_model.load_state_dict(
-      torch.load(opponent_model_path, weights_only=True)) 
+      torch.load(opponent_model_path)) 
 
 # Training loop
 temperature = initial_temperature
@@ -174,10 +198,22 @@ for episode in range(num_episodes):
             move_index = np.random.choice(len(legal_moves), p=probabilities)
             chosen_move = legal_moves[move_index]
 
+            # Calculating capture rewards
+            reward = 0.0
+            if board.is_capture(chosen_move):
+                captured_piece = board.piece_at(chosen_move.to_square)
+                if captured_piece is not None:
+                    if captured_piece.color != board.turn:
+                        captured_piece_type = captured_piece.piece_type
+                        reward += capture_rewards.get(captured_piece_type, 0.0)
+
             # Make the chosen move
             board.push(chosen_move)
             # Store the state after the move
             states.append(board_to_tensor(board))
+            # Add capture reward
+            rewards.append(reward)
+
         else:
             # Opponent's turn
             legal_moves = list(board.legal_moves)
@@ -203,33 +239,48 @@ for episode in range(num_episodes):
 
             # Make the chosen move
             board.push(chosen_move)
-            # Store the state after opponent's move
-            states.append(board_to_tensor(board))
     
     # Game has ended; determine the reward from AI's perspective
     result = board.result()
-    win_reward = reward_decay ** turn_count # favors shorter games
-    loss_reward = -reward_decay # a loss is a loss
+    offset_turns = max(turn_count - target_turn_count, 0)
+    win_reward = win_reward + win_turn_bonus * win_turn_bonus_decay ** offset_turns
+    loss_reward = -1 # a loss is a loss
     if result == '1-0':
-        reward = win_reward if ai_plays_white else loss_reward
+        final_reward = win_reward if ai_plays_white else loss_reward
     elif result == '0-1':
-        reward = loss_reward if ai_plays_white else win_reward
+        final_reward = loss_reward if ai_plays_white else win_reward
     else:
         # Stalemate
-        # The midpoint between the win and the loss
-        reward = (win_reward + loss_reward) / 2  
+        stalemate_turn_offset = max(turn_count - stalemate_target_turn, 0)
+        stalemate_percentage = stalemate_turn_decay ** stalemate_turn_offset
+        stalemate_actual_bonus = stalemate_turn_bonus * stalemate_percentage
+        final_reward = stalemate_reward + stalemate_actual_bonus
 
-    # Add the episode reward to the total reward
-    total_reward += reward
+    # Add the final game reward to the last move's reward
+    if rewards:
+        rewards[-1] += final_reward
+    else:
+        rewards.append(final_reward)
+
+    # Compute discounted cumulative rewards
+    def compute_returns(rewards, gamma):
+        returns = []
+        R = 0
+        for r in reversed(rewards):
+            R = r + gamma * R
+            returns.insert(0, R)
+        return returns
+    
+    returns = compute_returns(rewards, reward_decay)
 
     # Assign the reward to all states (from AI's perspective)
-    rewards = [reward] * len(states)
+    # rewards = [reward] * len(states)
 
     # Update the network using mean squared error loss
     optimizer.zero_grad()
     state_tensors = torch.cat(states, dim=0)
     state_values = trainee_model(state_tensors).squeeze()
-    targets = torch.tensor(rewards, device=device)
+    targets = torch.tensor(returns, device=device)
     loss = nn.functional.mse_loss(state_values, targets)
     loss.backward()
     optimizer.step()
@@ -238,19 +289,23 @@ for episode in range(num_episodes):
     temperature = max(min_temperature, temperature * temperature_decay)
 
     # Calculate mean reward up to the current episode
+    total_reward += sum(rewards)
     mean_reward = total_reward / (episode + 1)
 
     # Print progress every 10 episodes
     if (episode + 1) % 10 == 0:
         print(f'Episode {episode + 1}/{num_episodes}, '
-              + f'Mean Reward: {mean_reward:.4f}, '
-              + f'Reward: {reward}, '
+              + f'Mean Reward: {mean_reward:.3f}, '
+              + f'Episode Reward: {sum(rewards):.3f}, '
               + f'Turns: {turn_count}, '
-              + f'Temperature: {temperature:.4f}')
+              + f'Temperature: {temperature:.3f}')
 
 # Save the model after all episodes are completed
 timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 model_filename = f"RedChessAI{timestamp}.pth"
+optimizer_filename = f"RedChessAI{timestamp}_optimizer.pth"
 model_path = os.path.join(models_dir, model_filename)
+optimizer_path = os.path.join(models_dir, optimizer_filename)
 torch.save(trainee_model.state_dict(), model_path)
+torch.save(optimizer.state_dict(), optimizer_path)
 print(f"Model saved to {model_path}")
