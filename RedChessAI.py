@@ -27,6 +27,8 @@
 #       - https://www.geeksforgeeks.org/q-learning-in-python/
 #   - Reinforcement Learning in Chess
 #       - https://medium.com/@samgill1256/reinforcement-learning-in-chess-73d97fad96b3
+# Things to test:
+#   - board_to_tensor()
 
 import numpy as np
 import torch
@@ -34,24 +36,27 @@ import torch.nn as nn
 import torch.optim as optim
 import chess
 import chess.pgn
+import chess.engine
 import os
 from datetime import datetime
 from EvaluationNetwork import EvaluationNetwork
+from BoardToTensor import board_to_tensor
 
 
 # Hyperparameters
 learning_rate = 0.0001
-num_episodes = 1000
+num_episodes = 1
 initial_temperature = 1.0
 temperature_decay = 0.995
 min_temperature = 0.02
+opponent_temperature = 0.5
 
 # Reward Parameters
 reward_decay = 0.99
 win_turn_bonus_decay = 0.95
 target_turn_count = 100
-win_reward = 1 # reward for winning
-win_turn_bonus = 2 # bonus points for finishing the game within target turns
+win_reward = 1.0 # reward for winning
+win_turn_bonus = 2.0 # bonus points for finishing the game within target turns
 capture_rewards = {
     chess.PAWN: 0.01,
     chess.KNIGHT: 0.025,
@@ -59,20 +64,20 @@ capture_rewards = {
     chess.ROOK: 0.05,
     chess.QUEEN: 0.10
 }
-stalemate_reward = 0
-stalemate_turn_bonus = 1
+stalemate_reward = 0.0
+stalemate_turn_bonus = 1.0
 stalemate_turn_decay = 0.9
 stalemate_target_turn = 40
 
 # Starting point of trainee model
 load_trainee = False
-trainee_name = "RedChessAI20241002111715"
+trainee_name = "RedChessAI20241002143842"
 trainee_model_filename = trainee_name + ".pth" 
 trainee_optimizer_filename = trainee_name + "_optimizer.pth"
 
 # Model of the opponent (can be the same as trainee)
 load_opponent = True # If false, the opponent will play randomly
-opponent_model_load_file = "RedChessAI20241002120406.pth"
+opponent_model_load_file = "RedChessAI20241002143842.pth"
 
 # Endgame positions (We will focus training on endgame first)
 endgame_training = True
@@ -89,57 +94,15 @@ if not os.path.exists(models_dir):
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# Function to convert the chess board state to a tensor representation
-def board_to_tensor(board):
-    # Initialize a tensor of shape (14, 8, 8) filled with zeros
-    board_tensor = np.zeros((14, 8, 8), dtype=np.float32)
-    
-    # Mapping from piece type to index in the tensor channels
-    piece_indices = {
-        chess.PAWN: 0,
-        chess.KNIGHT: 1,
-        chess.BISHOP: 2,
-        chess.ROOK: 3,
-        chess.QUEEN: 4,
-        chess.KING: 5
-    }
-    
-    # Map pieces on the board to the tensor
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece is not None:
-            # Determine the offset for the piece color
-            color_offset = 0 if piece.color == chess.WHITE else 6
-            # Get the index for the piece type
-            piece_index = piece_indices[piece.piece_type] + color_offset
-            # Convert the square index to 2D coordinates (x, y)
-            x, y = divmod(square, 8)
-            # Set the presence of the piece in the tensor
-            board_tensor[piece_index, x, y] = 1.0
-    
-    # Initialize attack maps for white and black pieces
-    white_attacks = np.zeros((8, 8), dtype=np.float32)
-    black_attacks = np.zeros((8, 8), dtype=np.float32)
-    
-    # Generate attack maps
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece is not None:
-            # Get the squares attacked by the piece
-            attacks = board.attacks(square)
-            for attacked_square in attacks:
-                x, y = divmod(attacked_square, 8)
-                if piece.color == chess.WHITE:
-                    white_attacks[x, y] = 1.0
-                else:
-                    black_attacks[x, y] = 1.0
-    
-    # Add attack maps to the tensor
-    board_tensor[12] = white_attacks
-    board_tensor[13] = black_attacks
-    
-    # Convert the numpy array to a PyTorch tensor and add batch dimension
-    return torch.from_numpy(board_tensor).unsqueeze(0).to(device)
+# # source: https://stackoverflow.com/questions/58556338/python-evaluating-a-board-position-using-stockfish-from-the-python-chess-librar
+# def stockfish_evaluation(board, time_limit = 0.01):
+#     engine = chess.engine.SimpleEngine.popen_uci("engines\stockfish\stockfish-windows-x86-64-avx2.exe")
+#     result = engine.analyse(board, chess.engine.Limit(time=time_limit))
+#     score = result['score'].relative.score()
+#     if score == None:
+#         return -1000
+#     else:
+#         return score
 
 # Initialize the value network and optimizer
 trainee_model = EvaluationNetwork().to(device)
@@ -184,7 +147,7 @@ for episode in range(num_episodes):
             # Evaluate all legal moves using current_model
             for move in legal_moves:
                 board.push(move)
-                state_tensor = board_to_tensor(board)
+                state_tensor = board_to_tensor(board).unsqueeze(0).to(device)
                 value = trainee_model(state_tensor).item()
                 move_values.append(value)
                 board.pop()
@@ -210,7 +173,7 @@ for episode in range(num_episodes):
             # Make the chosen move
             board.push(chosen_move)
             # Store the state after the move
-            states.append(board_to_tensor(board))
+            states.append(board_to_tensor(board).unsqueeze(0).to(device))
             # Add capture reward
             rewards.append(reward)
 
@@ -219,21 +182,22 @@ for episode in range(num_episodes):
             legal_moves = list(board.legal_moves)
 
             if load_opponent:
-              move_values = []
-              # Evaluate all legal moves using opponent_model
-              for move in legal_moves:
-                  board.push(move)
-                  state_tensor = board_to_tensor(board)
-                  value = opponent_model(state_tensor).item()
-                  move_values.append(value)
-                  board.pop()
+                move_values = []
+                # Evaluate all legal moves using opponent_model
+                for move in legal_moves:
+                        board.push(move)
+                        state_tensor = board_to_tensor(board).unsqueeze(0).to(device)
+                        value = opponent_model(state_tensor).item()
+                        move_values.append(value)
+                        board.pop()
 
-              # Select the move with the highest predicted value
-              # (Opponent plays greedily for simplicity)
-              max_value = max(move_values)
-              best_moves = [move for i, move in enumerate(legal_moves) 
-                            if move_values[i] == max_value]
-              chosen_move = np.random.choice(best_moves)
+                # Apply softmax with temperature to the predicted values
+                logits = np.array(move_values) / opponent_temperature
+                probabilities = np.exp(logits - np.max(logits))
+                probabilities /= probabilities.sum()
+                
+                move_index = np.random.choice(len(legal_moves), p=probabilities)
+                chosen_move = legal_moves[move_index]
             else:
                 chosen_move = np.random.choice(legal_moves)
 
@@ -241,14 +205,15 @@ for episode in range(num_episodes):
             board.push(chosen_move)
     
     # Game has ended; determine the reward from AI's perspective
-    result = board.result()
     offset_turns = max(turn_count - target_turn_count, 0)
-    win_reward = win_reward + win_turn_bonus * win_turn_bonus_decay ** offset_turns
+    win_bonus = win_turn_bonus * win_turn_bonus_decay ** offset_turns
+    match_win_reward = win_reward + win_bonus
     loss_reward = -1 # a loss is a loss
+    result = board.result()
     if result == '1-0':
-        final_reward = win_reward if ai_plays_white else loss_reward
+        final_reward = match_win_reward if ai_plays_white else loss_reward
     elif result == '0-1':
-        final_reward = loss_reward if ai_plays_white else win_reward
+        final_reward = loss_reward if ai_plays_white else match_win_reward
     else:
         # Stalemate
         stalemate_turn_offset = max(turn_count - stalemate_target_turn, 0)

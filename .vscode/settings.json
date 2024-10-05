@@ -1,6 +1,7 @@
 {
   "cSpell.words": [
     "bestmove",
+    "centipawn",
     "dtype",
     "isready",
     "Meaders",
@@ -10,6 +11,7 @@
     "relu",
     "softmax",
     "startpos",
+    "Stockfish",
     "ucinewgame",
     "uciok",
     "unsqueeze"

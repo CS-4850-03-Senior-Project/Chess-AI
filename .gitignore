@@ -124,3 +124,5 @@ dmypy.json
 MODELS/
 codepal_example.py
 gpu_testing.py
+engines/
+ChessEvaluations/
