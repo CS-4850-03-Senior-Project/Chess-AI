@@ -44,19 +44,19 @@ from BoardToTensor import board_to_tensor
 
 
 # Hyperparameters
-learning_rate = 0.0001
-num_episodes = 1
-initial_temperature = 1.0
+learning_rate = 0.01
+num_episodes = 1000
+initial_temperature = 0.5
 temperature_decay = 0.995
-min_temperature = 0.02
-opponent_temperature = 0.5
+min_temperature = 0.05
+opponent_temperature = 0.25
 
 # Reward Parameters
 reward_decay = 0.99
 win_turn_bonus_decay = 0.95
-target_turn_count = 100
+target_turn_count = 80
 win_reward = 1.0 # reward for winning
-win_turn_bonus = 2.0 # bonus points for finishing the game within target turns
+win_turn_bonus = 1.0 # bonus points for finishing the game within target turns
 capture_rewards = {
     chess.PAWN: 0.01,
     chess.KNIGHT: 0.025,
@@ -70,14 +70,12 @@ stalemate_turn_decay = 0.9
 stalemate_target_turn = 40
 
 # Starting point of trainee model
-load_trainee = False
-trainee_name = "RedChessAI20241002143842"
-trainee_model_filename = trainee_name + ".pth" 
-trainee_optimizer_filename = trainee_name + "_optimizer.pth"
+load_trainee = True
+trainee_model_filename = "Pretrained.pth" 
 
 # Model of the opponent (can be the same as trainee)
 load_opponent = True # If false, the opponent will play randomly
-opponent_model_load_file = "RedChessAI20241002143842.pth"
+opponent_model_load_file = "Pretrained.pth"
 
 # Endgame positions (We will focus training on endgame first)
 endgame_training = True
@@ -112,15 +110,27 @@ opponent_model = EvaluationNetwork().to(device)
 # Load trainee
 if load_trainee:
   model_path = os.path.join(models_dir, trainee_model_filename)
-  trainee_model.load_state_dict(torch.load(model_path))
-  trainee_optimizer_path = os.path.join(models_dir, trainee_optimizer_filename)
-trainee_model.to(device)
+  trainee_checkpoint = torch.load(model_path)
+  trainee_model.load_state_dict(trainee_checkpoint['model_state_dict'])
+  optimizer.load_state_dict(trainee_checkpoint['optimizer_state_dict'])
+trainee_model.to(device) # This may not be necessary
 
 # Load opponent
 if load_opponent:
   opponent_model_path = os.path.join(models_dir, opponent_model_load_file)
-  opponent_model.load_state_dict(
-      torch.load(opponent_model_path)) 
+  opponent_checkpoint = torch.load(opponent_model_path)
+  opponent_model.load_state_dict(opponent_checkpoint['model_state_dict']) 
+
+def save_model():
+    # Save the model after all episodes are completed
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    model_filename = f"RedChessAI{timestamp}.pth"
+    model_path = os.path.join(models_dir, model_filename)
+    torch.save({
+        'model_state_dict': trainee_model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }, model_path)
+    print(f"Model saved to {model_path}")
 
 # Training loop
 temperature = initial_temperature
@@ -208,7 +218,7 @@ for episode in range(num_episodes):
     offset_turns = max(turn_count - target_turn_count, 0)
     win_bonus = win_turn_bonus * win_turn_bonus_decay ** offset_turns
     match_win_reward = win_reward + win_bonus
-    loss_reward = -1 # a loss is a loss
+    loss_reward = -1
     result = board.result()
     if result == '1-0':
         final_reward = match_win_reward if ai_plays_white else loss_reward
@@ -264,13 +274,7 @@ for episode in range(num_episodes):
               + f'Episode Reward: {sum(rewards):.3f}, '
               + f'Turns: {turn_count}, '
               + f'Temperature: {temperature:.3f}')
+        if(episode + 1) % 100 == 0:
+            save_model()
 
-# Save the model after all episodes are completed
-timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-model_filename = f"RedChessAI{timestamp}.pth"
-optimizer_filename = f"RedChessAI{timestamp}_optimizer.pth"
-model_path = os.path.join(models_dir, model_filename)
-optimizer_path = os.path.join(models_dir, optimizer_filename)
-torch.save(trainee_model.state_dict(), model_path)
-torch.save(optimizer.state_dict(), optimizer_path)
-print(f"Model saved to {model_path}")
+save_model()
