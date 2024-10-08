@@ -27,7 +27,8 @@ import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 from BoardToTensor import board_to_tensor
-from EvaluationNetwork import EvaluationNetwork
+from EvaluationNetworkTanh import EvaluationNetwork
+from datetime import datetime
 
 def preprocess_score(score_str):
   score_str = str(score_str).strip()
@@ -73,9 +74,10 @@ learning_rate = 0.0001
 
 # Check for CUDA
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}")
 
 # Load dataset
-dataset = ChessDataset('./ChessEvaluations/chessData.csv')
+dataset = ChessDataset('./ChessEvaluations/random_evals.csv')
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 # Initialize model
@@ -85,6 +87,8 @@ model.train()
 # Loss function and optimizer
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+report_on_batch = 100
 
 # Training loop
 for epoch in range(num_epochs):
@@ -106,13 +110,15 @@ for epoch in range(num_epochs):
 
     # Print statistics
     running_loss += loss.item()
-    if (i + 1) % 100 == 0:
-      print(f'Epoch [{epoch + 1}/{num_epochs}], Batch [{i + 1}], Loss: {running_loss / 100:.4f}')
+    if (i + 1) % report_on_batch == 0:
+      print(f'Epoch [{epoch + 1}/{num_epochs}], Batch [{i + 1}], Loss: {running_loss / report_on_batch:.2f}')
       running_loss = 0.0
 
-# Save model weights and optimizer state
-torch.save({
-    'epoch': num_epochs,
-    'model_state_dict': model.state_dict(),
-    'optimizer_state_dict': optimizer.state_dict(),
-}, 'evaluation_model.pth')
+  # Save model weights and optimizer state every epoch
+  timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+  model_filename = f"Pretrained{timestamp}.pth"
+  torch.save({
+      'epoch': num_epochs,
+      'model_state_dict': model.state_dict(),
+      'optimizer_state_dict': optimizer.state_dict(),
+  }, model_filename)

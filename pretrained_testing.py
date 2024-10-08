@@ -2,7 +2,7 @@ import chess
 from BoardToTensor import board_to_tensor
 import torch
 import os
-from EvaluationNetwork import EvaluationNetwork
+from EvaluationNetworkTanh import EvaluationNetwork
 
 # Some data to test
 """FEN,Evaluation
@@ -34,7 +34,7 @@ print(f"Using device: {device}")
 
 # Getting ahead of myself, let's load the model
 model_dir = "MODELS"
-model_filename = "Pretrained.pth"
+model_filename = "Pretrained20241008172417.pth"
 model_path = os.path.join(model_dir,model_filename)
 
 checkpoint = torch.load(model_path)
