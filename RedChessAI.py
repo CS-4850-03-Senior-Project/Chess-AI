@@ -250,6 +250,7 @@ for episode in range(num_episodes):
 
     # Assign the reward to all states (from AI's perspective)
     # rewards = [reward] * len(states)
+    
 
     # Update the network using mean squared error loss
     optimizer.zero_grad()

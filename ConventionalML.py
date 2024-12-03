@@ -29,6 +29,7 @@ import numpy as np
 from BoardToTensor import board_to_tensor
 from EvaluationNetworkTanh import EvaluationNetwork
 from datetime import datetime
+import os
 
 def preprocess_score(score_str):
   score_str = str(score_str).strip()
@@ -77,7 +78,7 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # Load dataset
-dataset = ChessDataset('./ChessEvaluations/random_evals.csv')
+dataset = ChessDataset('./ChessEvaluations/chessData.csv')
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 # Initialize model
@@ -88,10 +89,24 @@ model.train()
 criterion = nn.MSELoss()
 optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-report_on_batch = 100
+# Checkpoint details
+start_epoch = 0
+load_checkpoint = True
+checkpoint_filepath = "MODELS/Pretrained20241009024418.pth"
+
+# Load checkpoint if desired
+if load_checkpoint:
+    checkpoint = torch.load(checkpoint_filepath)
+    # TODO: Clear out this manual epoch overwrite after training resumes
+    start_epoch = 5 # checkpoint['epoch']
+    model.load_state_dict(checkpoint['model_state_dict'])
+    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    print(f'Loaded checkpoint "{checkpoint_filepath}" at epoch {start_epoch}')
+
 
 # Training loop
-for epoch in range(num_epochs):
+report_on_batch = 2000 # How often to print progress reports
+for epoch in range(start_epoch, num_epochs):
   running_loss = 0.0
   for i, (inputs, targets) in enumerate(dataloader):
     inputs = inputs.to(device)
@@ -116,9 +131,11 @@ for epoch in range(num_epochs):
 
   # Save model weights and optimizer state every epoch
   timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+  models_dir = "MODELS"
   model_filename = f"Pretrained{timestamp}.pth"
+  model_path = os.path.join(models_dir,model_filename)
   torch.save({
-      'epoch': num_epochs,
+      'epoch': epoch + 1,
       'model_state_dict': model.state_dict(),
       'optimizer_state_dict': optimizer.state_dict(),
-  }, model_filename)
+  }, model_path)

@@ -11,8 +11,6 @@ class EvaluationNetwork(nn.Module):
         self.conv1 = nn.Conv2d(14, 32, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
         self.fc1 = nn.Linear(64 * 8 * 8, hidden_size)
-        # Generate a list of intermediate layers instead of apply the same one
-        #   multiple times.
         self.intermediate_layers = nn.ModuleList(
             [nn.Linear(hidden_size, hidden_size) 
              for _ in range(intermediate_layers)])

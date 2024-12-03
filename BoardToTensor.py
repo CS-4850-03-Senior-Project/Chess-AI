@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import chess
 
-# Function to convert the chess board state to a tensor representation
+# Convert the chess board state to a tensor representation
 def board_to_tensor(board: chess.Board):
     # Initialize a tensor of shape (14, 8, 8) filled with zeros
     board_tensor = np.zeros((14, 8, 8), dtype=np.float32)
